@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor de Servicios</title>
+<style>
+  /* Colores del tema oscuro */
+  :root{
+    --bg:#0b1220; --panel:#131c2e; --panel2:#18233a; --borde:#243352;
+    --texto:#e6ecf8; --suave:#8b9bb9; --up:#22c55e; --down:#ef4444; --acento:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--texto);
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{padding:28px 32px 8px;display:flex;flex-wrap:wrap;gap:12px;
+         justify-content:space-between;align-items:center}
+  h1{margin:0;font-size:1.6rem}
+  h1 span{color:var(--acento)}
+  .meta{color:var(--suave);font-size:.85rem}
+  /* Punto verde que pulsa para indicar monitoreo en vivo */
+  .pulso{display:inline-block;width:9px;height:9px;border-radius:50%;
+         background:var(--up);margin-right:6px;animation:p 1.6s infinite}
+  @keyframes p{0%{box-shadow:0 0 0 0 rgba(34,197,94,.6)}
+               100%{box-shadow:0 0 0 10px rgba(34,197,94,0)}}
+  .resumen{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+           gap:14px;padding:16px 32px}
+  .kpi{background:var(--panel);border:1px solid var(--borde);border-radius:14px;padding:16px 18px}
+  .kpi .n{font-size:2rem;font-weight:700}
+  .kpi .l{color:var(--suave);font-size:.8rem;text-transform:uppercase;letter-spacing:.06em}
+  .up{color:var(--up)} .down{color:var(--down)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
+        gap:16px;padding:8px 32px 40px}
+  /* Tarjeta de cada servicio: borde verde si esta UP, rojo si esta DOWN */
+  .card{background:var(--panel);border:1px solid var(--borde);border-radius:16px;
+        padding:18px;border-left:5px solid var(--borde);transition:.2s}
+  .card.UP{border-left-color:var(--up)} .card.DOWN{border-left-color:var(--down)}
+  .card:hover{transform:translateY(-2px);background:var(--panel2)}
+  .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .nombre{font-weight:600}
+  .destino{color:var(--suave);font-size:.78rem;word-break:break-all;margin-top:2px}
+  .badge{font-size:.72rem;font-weight:700;padding:4px 10px;border-radius:999px}
+  .badge.UP{background:rgba(34,197,94,.15);color:var(--up)}
+  .badge.DOWN{background:rgba(239,68,68,.15);color:var(--down)}
+  .tipo{display:inline-block;margin-top:8px;font-size:.68rem;color:var(--acento);
+        border:1px solid var(--acento);border-radius:6px;padding:1px 7px}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0 10px}
+  .stats div{background:var(--bg);border-radius:10px;padding:8px 10px}
+  .stats b{display:block;font-size:1.05rem}
+  .stats small{color:var(--suave);font-size:.68rem;text-transform:uppercase}
+  .detalle{color:var(--suave);font-size:.8rem;margin-bottom:8px}
+  svg{width:100%;height:46px;display:block}
+  /* Barra con las ultimas revisiones: un cuadro por revision */
+  .barras{display:flex;gap:2px;margin-top:8px}
+  .barras i{flex:1;height:12px;border-radius:3px;background:var(--borde)}
+  .barras i.UP{background:var(--up)} .barras i.DOWN{background:var(--down)}
+  footer{text-align:center;color:var(--suave);font-size:.78rem;padding-bottom:30px}
+  a{color:var(--acento)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Monitor de <span>Servicios</span></h1>
+  <div class="meta"><span class="pulso"></span>En vivo · actualiza cada 5 s ·
+    última revisión: <b id="ultima">—</b></div>
+</header>
+
+<!-- Indicadores generales -->
+<section class="resumen">
+  <div class="kpi"><div class="n" id="k-total">0</div><div class="l">Servicios</div></div>
+  <div class="kpi"><div class="n up" id="k-up">0</div><div class="l">En línea</div></div>
+  <div class="kpi"><div class="n down" id="k-down">0</div><div class="l">Caídos</div></div>
+  <div class="kpi"><div class="n" id="k-disp">—</div><div class="l">Disponibilidad global</div></div>
+</section>
+
+<!-- Aqui JavaScript inserta una tarjeta por servicio -->
+<main class="grid" id="grid"></main>
+<footer>Revisión de servicios cada {{ intervalo }} s · API JSON: <a href="/api/status">/api/status</a></footer>
+
+<script>
+// Dibuja la grafica de latencia como una linea SVG a partir del historial
+function sparkline(hist){
+  const pts = hist.map(h => h.latencia);
+  const vals = pts.filter(v => v !== null);
+  if (vals.length < 2) return '<svg viewBox="0 0 300 46"></svg>';
+  const max = Math.max(...vals), min = Math.min(...vals);
+  const rango = (max - min) || 1;
+  const w = 300, h = 46, paso = w / (pts.length - 1);
+  let d = '', abierto = false;
+  pts.forEach((v, i) => {
+    if (v === null) { abierto = false; return; }   // si estuvo DOWN, se corta la linea
+    const x = (i * paso).toFixed(1);
+    const y = (h - 6 - ((v - min) / rango) * (h - 12)).toFixed(1);
+    d += (abierto ? 'L' : 'M') + x + ' ' + y + ' ';
+    abierto = true;
+  });
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <path d="${d}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round"/></svg>`;
+}
+
+// Construye el HTML de la tarjeta de un servicio
+function tarjeta(s){
+  const u = s.ultimo;
+  if (!u) return `<div class="card"><div class="nombre">${s.nombre}</div>
+                  <div class="detalle">Esperando primera revisión…</div></div>`;
+  const barras = s.historial.map(h => `<i class="${h.estado}" title="${h.hora} · ${h.estado}"></i>`).join('');
+  return `<div class="card ${u.estado}">
+    <div class="top">
+      <div><div class="nombre">${s.nombre}</div><div class="destino">${s.destino}</div>
+           <span class="tipo">${s.tipo}</span></div>
+      <span class="badge ${u.estado}">${u.estado}</span>
+    </div>
+    <div class="stats">
+      <div><b>${u.latencia !== null ? u.latencia + ' ms' : '—'}</b><small>Latencia</small></div>
+      <div><b>${s.latencia_promedio !== null ? s.latencia_promedio + ' ms' : '—'}</b><small>Promedio</small></div>
+      <div><b>${s.disponibilidad !== null ? s.disponibilidad + '%' : '—'}</b><small>Uptime</small></div>
+    </div>
+    <div class="detalle">${u.detalle} · ${u.hora}</div>
+    ${sparkline(s.historial)}
+    <div class="barras">${barras}</div>
+  </div>`;
+}
+
+// Pide el estado a la API y actualiza los indicadores y las tarjetas
+async function actualizar(){
+  try{
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    document.getElementById('k-total').textContent = d.resumen.total;
+    document.getElementById('k-up').textContent = d.resumen.up;
+    document.getElementById('k-down').textContent = d.resumen.down;
+    document.getElementById('ultima').textContent = d.resumen.ultima_revision || '—';
+    const conDatos = d.servicios.filter(s => s.disponibilidad !== null);
+    const prom = conDatos.length
+      ? (conDatos.reduce((a, s) => a + s.disponibilidad, 0) / conDatos.length).toFixed(1) + '%' : '—';
+    document.getElementById('k-disp').textContent = prom;
+    document.getElementById('grid').innerHTML = d.servicios.map(tarjeta).join('');
+  }catch(e){ console.error(e); }
+}
+actualizar();                    // primera carga
+setInterval(actualizar, 5000);   // repetir cada 5 segundos
+</script>
+</body>
+</html>
